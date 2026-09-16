@@ -1,0 +1,35 @@
+# Python 캐시 및 빌드 산출물
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# 가상환경 및 로컬 환경변수
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# 테스트 및 코드 검사 캐시
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# 편집기 및 운영체제 파일
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# 사용 예제에서 생성하는 출력 파일
+logo.txt
+logo.ansi
