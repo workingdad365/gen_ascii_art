@@ -8,10 +8,11 @@ import string
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from ascii_art import GLYPHS, apply_gradient, main, parse_color, render_text
+from ascii_art import GLYPHS, HOOK_MARKER, apply_gradient, main, parse_color, render_text
 
 
 class RenderTests(unittest.TestCase):
@@ -153,6 +154,92 @@ class MotdTests(unittest.TestCase):
             main()
         self.assertEqual(error.exception.code, 1)
         self.assertIn("sudo", stderr.getvalue())
+
+
+class ShellHookTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.home = Path(directory.name)
+        self.motd = self.home / "motd"
+        self.hook = f"[ -t 1 ] && [ -r {self.motd} ] && cat {self.motd}\n"
+
+    def run_main(self, shell, *options):
+        user = SimpleNamespace(
+            pw_dir=str(self.home), pw_shell=shell, pw_uid=os.getuid(), pw_gid=os.getgid(),
+        )
+        with patch("ascii_art.MOTD_PATH", self.motd), \
+                patch("ascii_art.resolve_login_user", return_value=user), \
+                patch.object(sys, "argv", ["ascii_art.py", "WELCOME", "--motd", *options]), \
+                patch("sys.stdout", new_callable=io.StringIO) as stdout, \
+                patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            try:
+                main()
+                code = 0
+            except SystemExit as error:
+                code = error.code
+        return code, stdout.getvalue(), stderr.getvalue()
+
+    def test_zsh_creates_zprofile_and_is_idempotent(self):
+        target = self.home / ".zprofile"
+        code, stdout, _ = self.run_main("/usr/bin/zsh", "--shell-hook")
+        self.assertEqual(code, 0)
+        self.assertIn(str(target), stdout)
+        self.assertEqual(target.read_text(encoding="utf-8"), HOOK_MARKER + "\n" + self.hook)
+        saved = target.read_text(encoding="utf-8")
+        code, stdout, _ = self.run_main("/usr/bin/zsh", "--shell-hook")
+        self.assertEqual(code, 0)
+        self.assertIn("이미", stdout)
+        self.assertEqual(target.read_text(encoding="utf-8"), saved)
+
+    def test_appends_without_breaking_existing_content(self):
+        target = self.home / ".zprofile"
+        target.write_text("export PATH=$HOME/bin:$PATH", encoding="utf-8")
+        self.assertEqual(self.run_main("/bin/zsh", "--shell-hook")[0], 0)
+        self.assertEqual(
+            target.read_text(encoding="utf-8"),
+            "export PATH=$HOME/bin:$PATH\n\n" + HOOK_MARKER + "\n" + self.hook,
+        )
+
+    def test_skips_when_hook_exists_in_zshrc(self):
+        zshrc = self.home / ".zshrc"
+        zshrc.write_text(f"[[ -r {self.motd} ]] && cat {self.motd}\n", encoding="utf-8")
+        code, stdout, _ = self.run_main("/usr/bin/zsh", "--shell-hook")
+        self.assertEqual(code, 0)
+        self.assertIn(str(zshrc), stdout)
+        self.assertFalse((self.home / ".zprofile").exists())
+
+    def test_bash_prefers_existing_profile_by_priority(self):
+        self.assertEqual(self.run_main("/bin/bash", "--shell-hook")[0], 0)
+        self.assertIn(self.hook, (self.home / ".profile").read_text(encoding="utf-8"))
+        (self.home / ".profile").unlink()
+        (self.home / ".bash_login").write_text("", encoding="utf-8")
+        (self.home / ".profile").write_text("", encoding="utf-8")
+        self.assertEqual(self.run_main("/bin/bash", "--shell-hook")[0], 0)
+        self.assertIn(self.hook, (self.home / ".bash_login").read_text(encoding="utf-8"))
+        self.assertEqual((self.home / ".profile").read_text(encoding="utf-8"), "")
+
+    def test_unsupported_shell_reports_after_saving_motd(self):
+        code, _, stderr = self.run_main("/usr/bin/fish", "--shell-hook")
+        self.assertEqual(code, 1)
+        self.assertIn("fish", stderr)
+        self.assertTrue(self.motd.exists())
+        self.assertEqual([path.name for path in self.home.iterdir()], ["motd"])
+
+    def test_motd_without_hook_option_leaves_home_untouched(self):
+        code, stdout, _ = self.run_main("/usr/bin/zsh")
+        self.assertEqual((code, stdout), (0, ""))
+        self.assertEqual([path.name for path in self.home.iterdir()], ["motd"])
+
+    def test_hook_requires_motd(self):
+        with patch.object(sys, "argv", ["ascii_art.py", "WELCOME", "--shell-hook"]), \
+                patch("ascii_art.install_shell_hook") as install, \
+                patch("sys.stderr", new_callable=io.StringIO) as stderr, \
+                self.assertRaises(SystemExit) as error:
+            main()
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn("--motd", stderr.getvalue())
+        install.assert_not_called()
 
 
 if __name__ == "__main__":

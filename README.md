@@ -56,7 +56,18 @@ Ubuntu에서도 `/etc/motd`를 사용하지만, 새 터미널 창을 여는 과�
 cat /etc/motd
 ```
 
-파일이 없거나 비어 있다면 위의 `--motd` 명령으로 다시 저장함. `cat`으로는 보이지만 새 터미널에서 표시되지 않는다면, zsh 사용 시 `~/.zshrc` 맨 위에 다음 한 줄을 추가함.
+파일이 없거나 비어 있다면 위의 `--motd` 명령으로 다시 저장함. `cat`으로는 보이지만 새 터미널에서 표시되지 않는다면 `--shell-hook`을 함께 지정하여 로그인 셸 설정 파일에 출력 구문을 자동으로 등록함.
+
+```bash
+sudo python3 ascii_art.py WELCOME --motd --shell-hook
+```
+
+- sudo로 실행해도 `SUDO_USER`를 기준으로 원 사용자의 홈 디렉터리에 등록하며, 새로 만든 파일은 원 사용자 소유로 설정함.
+- zsh는 `~/.zprofile`, bash는 `~/.bash_profile` → `~/.bash_login` → `~/.profile` 중 먼저 존재하는 파일(없으면 `~/.profile`)에 추가함. 그 외의 셸은 지원하지 않음.
+- 대상 파일이나 `~/.zshrc`, `~/.zlogin`, `~/.bashrc`에 `cat /etc/motd` 구문이 이미 있으면 변경하지 않으므로 반복 실행해도 중복 등록되지 않음.
+- SSH처럼 PAM이 이미 `/etc/motd`를 출력하는 환경에서는 아트가 두 번 표시되므로 사용하지 않음.
+
+등록되는 구문은 로그인 셸에서만 실행되므로 tmux 내부 창처럼 로그인 셸이 아닌 환경에서는 표시되지 않음. 모든 대화형 셸에서 표시하려면 zsh 사용 시 `~/.zshrc` 맨 위에 다음 한 줄을 직접 추가함.
 
 ```zsh
 [[ -o interactive && -t 1 && -r /etc/motd ]] && cat /etc/motd
